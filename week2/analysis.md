@@ -1,12 +1,44 @@
-# Week 2 - 그래프 분석
+# Week 2 - 멀티암드 밴딧 (Multi-Armed Bandit)
 
-## graph_a.png 분석 (비정상 환경, α 비교)
+## 파일 설명
+
+### bandit.py
+- `Bandit`: 팔(arm)마다 고정된 승률(rate)을 갖는 정상(stationary) 밴딧 환경.
+- `Agent`: 표본 평균(sample average) 방식으로 가치(Q)를 갱신하는 ε-greedy 에이전트.
+
+### non_stationary.py
+- `NonStatBandit`: 매 스텝마다 각 팔의 승률이 랜덤하게 흔들리는 비정상(non-stationary) 밴딧 환경.
+- `AlphaAgent`: 고정된 학습률 α로 Q값을 갱신하는 ε-greedy 에이전트 (최근 보상에 더 큰 가중치).
+
+### parameter_alpha.py
+- 비정상 환경에서 표본 평균 에이전트(`Agent`)와 다양한 α값(`AlphaAgent`, α=0.2/0.5/0.8)을 비교.
+- 200회 반복 × 1000 스텝 동안 평균 보상률을 계산해 그래프로 비교.
+
+### parameter_epsilon.py
+- 정상 환경(`Bandit`)에서 ε값(0.1, 0.3, 0.01)을 바꿔가며 성능을 비교.
+- 200회 반복 × 1000 스텝 동안 평균 보상률을 계산해 그래프로 비교.
+
+### graph_a.png / graph_e.png
+- 각각 `parameter_alpha.py`, `parameter_epsilon.py` 실행 결과 그래프.
+
+## 파일 의존 관계
+
+![dependency graph](./dependency_graph.png)
+
+- `bandit.py`는 다른 파일을 불러오지 않는 기본 모듈로, `Bandit`/`Agent` 클래스를 정의함.
+- `non_stationary.py`는 `bandit.py`에서 `Agent`를 불러와 사용하고, 자체적으로 `NonStatBandit`/`AlphaAgent`를 정의함.
+- `parameter_epsilon.py`는 `bandit.py`에서 `Bandit`, `Agent`를 불러와 ε 비교 실험을 수행함.
+- `parameter_alpha.py`는 `bandit.py`에서 `Agent`를, `non_stationary.py`에서 `NonStatBandit`, `AlphaAgent`를 불러와 α 비교 실험을 수행함.
+
+## 그래프 분석
+
+### graph_a.png 분석 (비정상 환경, α 비교)
 - 최종 성능(1000 step 기준): alpha=0.5 (~0.93) > alpha=0.8 (~0.92) > alpha=0.2 (~0.91) > sample average (~0.89) 순.
 - `sample average`(표본 평균, 1/n 스텝사이즈)는 초반엔 다른 에이전트와 비슷하게 따라가지만, step이 진행될수록 스텝사이즈가 계속 작아져 변화하는 승률(비정상성)을 따라잡지 못해 결국 가장 낮은 성능에 수렴함.
 - 고정 α를 쓰는 `AlphaAgent`는 최근 보상에 더 큰 가중치를 주기 때문에 환경 변화에 지속적으로 적응할 수 있어 전반적으로 더 우수함.
 - α=0.2는 적응 속도가 느려 초반 상승이 가장 더딤. α=0.5는 적응 속도와 안정성의 균형이 가장 좋아 최고 성능을 보임. α=0.8은 최근 보상 반영 비중이 지나치게 커서 약간의 변동성은 있지만 여전히 sample average보다 우수함.
 
-## graph_e.png 분석 (정상 환경, ε 비교)
+### graph_e.png 분석 (정상 환경, ε 비교)
 - 최종 성능(1000 step 기준): ε=0.1 (~0.84) > ε=0.3 (~0.77) > ε=0.01 (~0.72) 순.
 - ε=0.3은 탐험 비율이 높아 초반에 가장 빠르게 좋은 팔을 찾아내지만, 학습이 끝난 뒤에도 30%나 무작위 행동을 계속하기 때문에 최종 성능은 오히려 낮음(과도한 탐험으로 인한 손실).
 - ε=0.01은 탐험이 거의 없어 최적 팔을 찾는 데 가장 오래 걸리고, 1000 step 시점까지도 계속 완만하게 상승 중이며 다른 설정을 따라잡지 못함(탐험 부족으로 학습이 느림).
