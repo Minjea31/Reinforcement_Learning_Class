@@ -1,0 +1,22 @@
+# AI coding assistants: local settings, instructions, and session data
+.pdf
+.codex/
+.claude/
+.agents/
+.cursor/
+.windsurf/
+.aider*
+.continue/
+.copilot/
+.gemini/
+AGENTS.md
+AGENTS.override.md
+CLAUDE.md
+CLAUDE.local.md
+GEMINI.md
+.cursorrules
+.cursorignore
+.windsurfrules
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
