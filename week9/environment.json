@@ -1,0 +1,7 @@
+{
+  "python": "3.14.6 | packaged by Anaconda, Inc. | (main, Jul  9 2026, 14:37:38) [GCC 14.3.0]",
+  "numpy": "2.4.6",
+  "matplotlib": "3.11.0",
+  "dezero_source": "https://github.com/oreilly-japan/deep-learning-from-scratch-3",
+  "dezero_commit": "b5f3cf12a9e4ed84fc97b57bf41a25610d69c9e5"
+}

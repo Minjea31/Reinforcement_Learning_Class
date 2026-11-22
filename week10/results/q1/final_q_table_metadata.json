@@ -1,0 +1,20 @@
+{
+  "config": {
+    "gamma": 0.9,
+    "lr": 0.01,
+    "epsilon": 0.1,
+    "episodes": 4000,
+    "width": 100,
+    "depth": 1
+  },
+  "config_id": "33b664964069",
+  "seed": 2,
+  "action_order": [
+    "UP",
+    "DOWN",
+    "LEFT",
+    "RIGHT"
+  ],
+  "coordinate": "zero-based row,col",
+  "invalid_states": "wall / terminal outputs not policy values"
+}

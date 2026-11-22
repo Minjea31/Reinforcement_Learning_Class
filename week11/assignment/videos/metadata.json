@@ -1,0 +1,11 @@
+{
+  "renderer": "unmodified OpenAI Gym MountainCarEnv.render",
+  "environment": "MountainCar-v0",
+  "policy": "categorical",
+  "episode_index": 0,
+  "frames": 158,
+  "fps": 30,
+  "duration": 5.266666666666667,
+  "return_": -113.0,
+  "success": true
+}

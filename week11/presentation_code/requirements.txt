@@ -1,0 +1,5 @@
+numpy
+matplotlib
+python-pptx
+PyMuPDF
+Pillow

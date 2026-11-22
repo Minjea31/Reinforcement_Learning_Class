@@ -1,0 +1,25 @@
+{
+  "passed": true,
+  "protocol": "gym0262_dezero_online_td1_raw_reward_categorical_v4",
+  "environment_class": "gym.envs.classic_control.mountain_car.MountainCarEnv",
+  "one_update_per_environment_transition": true,
+  "raw_environment_reward": true,
+  "categorical_training_validation_test": true,
+  "exact_lecture_td_gradient": [
+    {
+      "done": false,
+      "correct_value_gradient": true,
+      "negative_td_reduces_selected_probability": true
+    },
+    {
+      "done": true,
+      "correct_value_gradient": true,
+      "negative_td_reduces_selected_probability": true
+    }
+  ],
+  "all_saved_model_probabilities_match_DeZero": true,
+  "all_validation_episode_rewards_reproduced": true,
+  "settings": 29,
+  "independent_episodes": 100,
+  "training_budget_prefix_matches": true
+}

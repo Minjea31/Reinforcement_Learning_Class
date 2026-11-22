@@ -1,0 +1,7 @@
+# Python 3.10. Official Gym and DeZero are also vendored with licenses.
+numpy==1.26.4
+gym==0.26.2
+pygame==2.1.2
+Pillow>=9.0
+matplotlib>=3.5,<3.9
+cloudpickle>=1.2

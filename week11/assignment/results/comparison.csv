@@ -1,0 +1,40 @@
+study,parameter,value,mean,std,success
+basic,gamma,0.900,-200.000,0.000,0.000
+basic,gamma,0.980,-200.000,0.000,0.000
+basic,gamma,0.995,-200.000,0.000,0.000
+basic,actor_lr,0.200 ×10⁻³,-200.000,0.000,0.000
+basic,actor_lr,1.000 ×10⁻³,-200.000,0.000,0.000
+basic,actor_lr,3.000 ×10⁻³,-200.000,0.000,0.000
+basic,critic_lr,0.500 ×10⁻³,-200.000,0.000,0.000
+basic,critic_lr,1.000 ×10⁻³,-130.967,35.243,1.000
+basic,critic_lr,3.000 ×10⁻³,-200.000,0.000,0.000
+basic,width,32,-200.000,0.000,0.000
+basic,width,64,-200.000,0.000,0.000
+basic,width,128,-200.000,0.000,0.000
+basic,depth,1,-200.000,0.000,0.000
+basic,depth,2,-200.000,0.000,0.000
+basic,depth,3,-200.000,0.000,0.000
+basic,beta1,0.800,-200.000,0.000,0.000
+basic,beta1,0.900,-200.000,0.000,0.000
+basic,beta1,0.950,-200.000,0.000,0.000
+basic,velocity_scale,1.000,-200.000,0.000,0.000
+basic,velocity_scale,100.000,-200.000,0.000,0.000
+basic,velocity_scale,1000.000,-200.000,0.000,0.000
+basic,episodes,500,-200.000,0.000,0.000
+basic,episodes,1000,-200.000,0.000,0.000
+basic,episodes,2000,-200.000,0.000,0.000
+additional,gamma,0.900,-118.067,7.257,1.000
+additional,gamma,0.980,-119.567,18.649,1.000
+additional,gamma,0.995,-200.000,0.000,0.000
+additional,actor_lr,0.050 ×10⁻³,-200.000,0.000,0.000
+additional,actor_lr,0.200 ×10⁻³,-119.567,18.649,1.000
+additional,actor_lr,1.000 ×10⁻³,-200.000,0.000,0.000
+additional,critic_lr,0.100 ×10⁻³,-200.000,0.000,0.000
+additional,critic_lr,0.500 ×10⁻³,-119.567,18.649,1.000
+additional,critic_lr,3.000 ×10⁻³,-200.000,0.000,0.000
+additional,width,64,-200.000,0.000,0.000
+additional,width,128,-173.633,25.039,0.600
+additional,width,256,-119.567,18.649,1.000
+additional,beta1,0.800,-176.000,20.381,0.667
+additional,beta1,0.900,-119.567,18.649,1.000
+additional,beta1,0.950,-200.000,0.000,0.000
