@@ -1,0 +1,130 @@
+<mujoco model="Dual spherical-joint Reacher">
+  <compiler angle="degree" autolimits="true"/>
+  <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81" cone="elliptic" iterations="80"/>
+  <size njmax="1500" nconmax="300"/>
+  <visual>
+    <global offwidth="1440" offheight="1000"/>
+    <headlight ambient="0.3 0.3 0.3" diffuse="0.65 0.65 0.65" specular="0.2 0.2 0.2"/>
+    <rgba haze="0.09 0.11 0.15 1"/>
+    <quality shadowsize="2048"/>
+  </visual>
+  <default>
+    <joint damping="1.5" armature="0.015"/>
+    <geom friction="1.5 0.01 0.001" condim="4" solref="0.01 1" solimp="0.95 0.99 0.001"/>
+    <motor ctrllimited="true" ctrlrange="-65 65"/>
+    <default class="finger">
+      <joint type="slide" range="0 0.045" damping="2" armature="0.002"/>
+      <geom type="box" size="0.023 0.012 0.022" mass="0.045" friction="2.5 0.02 0.002" rgba="0.18 0.21 0.27 1"/>
+    </default>
+  </default>
+  <asset>
+    <texture name="floor_tex" type="2d" builtin="checker" rgb1="0.12 0.14 0.18" rgb2="0.16 0.18 0.22" width="512" height="512"/>
+    <material name="floor_mat" texture="floor_tex" texrepeat="3 3" reflectance="0.12"/>
+    <material name="table_mat" rgba="0.3 0.34 0.4 1" reflectance="0.1"/>
+  </asset>
+  <worldbody>
+    <light pos="0 -0.3 2.8" dir="0 0 -1" directional="true"/>
+    <light pos="1 1 2" dir="-0.5 -0.5 -1" diffuse="0.45 0.45 0.45"/>
+    <geom name="floor" type="plane" size="3 3 0.1" material="floor_mat"/>
+    <geom name="table" type="box" pos="0 0 0.56" size="1.0 0.68 0.04" material="table_mat" friction="0.55 0.01 0.001"/>
+    <!-- A mocap body lets reset move the obstacle with correct dynamic broadphase.
+         Compile conservative maximum bounds; runtime box sizes stay below these. -->
+    <body name="obstacle_body" mocap="true" pos="0 0.02 0.70">
+      <geom name="obstacle" type="box" size="0.14 0.08 0.10" rgba="0.88 0.27 0.22 1"/>
+    </body>
+    <site name="goal" type="box" pos="0 0.30 0.601" size="0.30 0.065 0.002" rgba="0.22 0.78 0.55 0.65"/>
+    <site name="start" type="box" pos="0 -0.28 0.601" size="0.30 0.065 0.002" rgba="0.82 0.65 0.2 0.4"/>
+    <camera name="overview" pos="1.7 -2.2 1.9" xyaxes="0.79 0.61 0 -0.28 0.36 0.89"/>
+    <body name="left_base" pos="-0.68 0 0.60">
+      <geom name="left_pedestal" type="cylinder" pos="0 0 0.17" size="0.075 0.17" rgba="0.15 0.37 0.64 1"/>
+      <body name="left_upper" pos="0 0 0.45">
+        <joint name="left_shoulder" type="ball" limited="true" range="0 165"/>
+        <geom name="left_shoulder_shell" type="sphere" size="0.046" mass="0.12" rgba="0.55 0.73 0.94 1"/>
+        <geom name="left_upper_link" type="capsule" fromto="0 0 0 0.43 0 0" size="0.025" mass="0.55" rgba="0.19 0.48 0.85 1"/>
+        <body name="left_lower" pos="0.43 0 0">
+          <joint name="left_elbow" type="ball" limited="true" range="0 165"/>
+          <geom name="left_elbow_shell" type="sphere" size="0.038" mass="0.1" rgba="0.55 0.73 0.94 1"/>
+          <geom name="left_lower_link" type="capsule" fromto="0 0 0 0.33 0 0" size="0.021" mass="0.35" rgba="0.23 0.55 0.91 1"/>
+          <body name="left_palm" pos="0.36 0 0">
+            <geom name="left_palm_geom" type="box" size="0.04 0.065 0.016" mass="0.12" rgba="0.2 0.24 0.31 1"/>
+            <site name="left_grasp" pos="0 0 -0.085" size="0.006" rgba="0.65 0.83 1 0.75"/>
+            <body name="left_finger_a" pos="0 0.020 -0.080" childclass="finger">
+              <joint name="left_finger_a_joint" axis="0 1 0"/>
+              <geom name="left_pad_a"/>
+              <geom name="left_finger_stem_a" size="0.012 0.009 0.03" pos="0 0 0.045" mass="0.02"/>
+            </body>
+            <body name="left_finger_b" pos="0 -0.020 -0.080" childclass="finger">
+              <joint name="left_finger_b_joint" axis="0 -1 0"/>
+              <geom name="left_pad_b"/>
+              <geom name="left_finger_stem_b" size="0.012 0.009 0.03" pos="0 0 0.045" mass="0.02"/>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+    <body name="right_base" pos="0.68 0 0.60" quat="0 0 0 1">
+      <geom name="right_pedestal" type="cylinder" pos="0 0 0.17" size="0.075 0.17" rgba="0.70 0.38 0.10 1"/>
+      <body name="right_upper" pos="0 0 0.45">
+        <joint name="right_shoulder" type="ball" limited="true" range="0 165"/>
+        <geom name="right_shoulder_shell" type="sphere" size="0.046" mass="0.12" rgba="1 0.76 0.43 1"/>
+        <geom name="right_upper_link" type="capsule" fromto="0 0 0 0.43 0 0" size="0.025" mass="0.55" rgba="0.94 0.49 0.16 1"/>
+        <body name="right_lower" pos="0.43 0 0">
+          <joint name="right_elbow" type="ball" limited="true" range="0 165"/>
+          <geom name="right_elbow_shell" type="sphere" size="0.038" mass="0.1" rgba="1 0.76 0.43 1"/>
+          <geom name="right_lower_link" type="capsule" fromto="0 0 0 0.33 0 0" size="0.021" mass="0.35" rgba="0.98 0.57 0.23 1"/>
+          <body name="right_palm" pos="0.36 0 0">
+            <geom name="right_palm_geom" type="box" size="0.04 0.065 0.016" mass="0.12" rgba="0.2 0.24 0.31 1"/>
+            <site name="right_grasp" pos="0 0 -0.085" size="0.006" rgba="1 0.82 0.55 0.75"/>
+            <body name="right_finger_a" pos="0 0.020 -0.080" childclass="finger">
+              <joint name="right_finger_a_joint" axis="0 1 0"/>
+              <geom name="right_pad_a"/>
+              <geom name="right_finger_stem_a" size="0.012 0.009 0.03" pos="0 0 0.045" mass="0.02"/>
+            </body>
+            <body name="right_finger_b" pos="0 -0.020 -0.080" childclass="finger">
+              <joint name="right_finger_b_joint" axis="0 -1 0"/>
+              <geom name="right_pad_b"/>
+              <geom name="right_finger_stem_b" size="0.012 0.009 0.03" pos="0 0 0.045" mass="0.02"/>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+    <body name="payload" pos="0 -0.28 0.627">
+      <freejoint name="payload_free"/>
+      <geom name="payload_geom" type="box" size="0.28 0.035 0.025" mass="1" rgba="0.92 0.76 0.25 1" friction="2 0.015 0.001"/>
+      <site name="payload_left" pos="-0.21 0 0" size="0.004" rgba="1 1 1 1"/>
+      <site name="payload_right" pos="0.21 0 0" size="0.004" rgba="1 1 1 1"/>
+    </body>
+  </worldbody>
+  <contact>
+    <exclude body1="obstacle_body" body2="world"/>
+    <exclude body1="left_upper" body2="left_base"/>
+    <exclude body1="right_upper" body2="right_base"/>
+    <exclude body1="left_lower" body2="left_palm"/>
+    <exclude body1="right_lower" body2="right_palm"/>
+  </contact>
+  <equality>
+    <joint joint1="left_finger_a_joint" joint2="left_finger_b_joint" polycoef="0 1 0 0 0" solref="0.005 1"/>
+    <joint joint1="right_finger_a_joint" joint2="right_finger_b_joint" polycoef="0 1 0 0 0" solref="0.005 1"/>
+  </equality>
+  <tendon>
+    <fixed name="left_grip"><joint joint="left_finger_a_joint" coef="0.5"/><joint joint="left_finger_b_joint" coef="0.5"/></fixed>
+    <fixed name="right_grip"><joint joint="right_finger_a_joint" coef="0.5"/><joint joint="right_finger_b_joint" coef="0.5"/></fixed>
+  </tendon>
+  <actuator>
+    <motor name="left_shoulder_x" joint="left_shoulder" gear="1 0 0 0 0 0"/>
+    <motor name="left_shoulder_y" joint="left_shoulder" gear="0 1 0 0 0 0"/>
+    <motor name="left_shoulder_z" joint="left_shoulder" gear="0 0 1 0 0 0"/>
+    <motor name="left_elbow_x" joint="left_elbow" gear="1 0 0 0 0 0"/>
+    <motor name="left_elbow_y" joint="left_elbow" gear="0 1 0 0 0 0"/>
+    <motor name="left_elbow_z" joint="left_elbow" gear="0 0 1 0 0 0"/>
+    <position name="left_gripper" tendon="left_grip" kp="6000" kv="60" ctrlrange="0 0.045" forcerange="-200 200"/>
+    <motor name="right_shoulder_x" joint="right_shoulder" gear="1 0 0 0 0 0"/>
+    <motor name="right_shoulder_y" joint="right_shoulder" gear="0 1 0 0 0 0"/>
+    <motor name="right_shoulder_z" joint="right_shoulder" gear="0 0 1 0 0 0"/>
+    <motor name="right_elbow_x" joint="right_elbow" gear="1 0 0 0 0 0"/>
+    <motor name="right_elbow_y" joint="right_elbow" gear="0 1 0 0 0 0"/>
+    <motor name="right_elbow_z" joint="right_elbow" gear="0 0 1 0 0 0"/>
+    <position name="right_gripper" tendon="right_grip" kp="6000" kv="60" ctrlrange="0 0.045" forcerange="-200 200"/>
+  </actuator>
+</mujoco>
