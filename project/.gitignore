@@ -1,3 +1,23 @@
 .venv/
 __pycache__/
 *.py[cod]
+runs/
+.venv-cuda/
+replay_site/
+*.sock
+
+# Trained weights and generated recordings
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+*.mp4
+*.webm
+*.log
+*.pid
+
+# Local credentials
+.env
+.env.*
+!.env.example

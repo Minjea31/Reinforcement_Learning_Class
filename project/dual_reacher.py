@@ -36,8 +36,8 @@ def quat_rotvec(quat):
 class DualReacherEnv(gym.Env):
     metadata = {"render_modes": ["rgb_array"], "render_fps": 50}
 
-    def __init__(self, render_mode=None, payload_mass=1.0, max_steps=2000,
-                 task='random', randomize=True):
+    def __init__(self, render_mode=None, payload_mass=5.0, max_steps=2000,
+                 task='random', randomize=True, reward_gamma=.999):
         super().__init__()
         self.model = mujoco.MjModel.from_xml_path(str(MODEL_PATH))
         self.data = mujoco.MjData(self.model)
@@ -45,6 +45,7 @@ class DualReacherEnv(gym.Env):
         self.render_mode = render_mode
         self.renderer = None
         self.max_steps = max_steps
+        self.reward_gamma = reward_gamma
         if task != 'random':
             raise ValueError(f'Unknown task: {task}')
         self.task_selection = task
@@ -199,7 +200,15 @@ class DualReacherEnv(gym.Env):
         self.steps = 0
         self.success_steps = 0
         self.collision_total = 0
+        self.lift_seconds = 0.
+        self.grasp_seconds = np.zeros(2)
+        self.used_arms = np.zeros(2, dtype=bool)
+        self.carried = False
+        self.episode_lifted = False
+        self.episode_effort = 0.
+        self.episode_return = 0.
         mujoco.mj_forward(self.model, self.data)
+        self.previous_potential = self._potential(self.info())
         return self._observation(), self.info()
 
     def action_from_data(self, data):
@@ -266,32 +275,117 @@ class DualReacherEnv(gym.Env):
         for idx in (6, 13):
             self.data.ctrl[idx] = .0225*(1+action[idx])
 
+    def _potential(self, info):
+        # Differences, rather than repeated stage bonuses, prevent reward farming.
+        distance = np.min(np.linalg.norm(
+            self.data.site_xpos[self.sites] - info['payload_position'], axis=1))
+        approach = 4. * np.exp(-4. * distance)
+        grasp = 4. * min(1., float(self.grasp_seconds.max()) / .1)
+        lift = 8. * min(1., self.lift_seconds / .2)
+        transport = 20. * (1. - min(1., info['goal_distance'] / 1.4)) if self.carried else 0.
+        settle = 4. * min(1., self.success_steps * self.dt) if self.carried else 0.
+        return float(approach + grasp + lift + transport + settle)
+
+    def _goal_reached(self, info):
+        return info['placed'] and self.carried
+
+    def _success_duration(self):
+        return 1.
+
+    def _cost_scales(self):
+        return dict(effort=1.,second_arm=1.,time=1.)
+
     def step(self, action):
         action = np.asarray(action, dtype=float)
         if action.shape != (14,) or not np.isfinite(action).all():
             raise ValueError("Action must contain 14 finite numbers")
         self.target_action = np.clip(action, -1, 1)
+        torque_integral = grip_integral = 0.
         for _ in range(self.frame_skip):
             self._control(self.target_action)
             mujoco.mj_step(self.model, self.data)
+            # Integrate actual motor forces, including gravity compensation and holding.
+            torque_integral += float(np.abs(self.data.qfrc_actuator[self.ball_dofs]).mean()/65.) * self.model.opt.timestep
+            grip_integral += float(np.abs(self.data.actuator_force[[6, 13]]).mean()/200.) * self.model.opt.timestep
         mujoco.mj_forward(self.model, self.data)
         self.steps += 1
         info = self.info()
         self.collision_total += info['obstacle_contacts'] + info['arm_contacts']
-        info['collision_total'] = self.collision_total
-        self.success_steps = self.success_steps+1 if info['placed'] else 0
-        info['is_success'] = self.success_steps >= 50
-        reward = -3*info['goal_distance'] - .002*float(np.square(action).sum())
-        reward -= .3*(info['obstacle_contacts']+info['arm_contacts'])
-        reward += 5. if info['is_success'] else 0.
-        fallen = bool(self.data.xpos[self.payload_id, 2] < .48)
-        return self._observation(), float(reward), fallen or info['is_success'], self.steps >= self.max_steps, info
+        self.grasp_seconds = np.where(info['grasped'], np.minimum(.1, self.grasp_seconds+self.dt), 0.)
+        previously_both = bool(self.used_arms.all())
+        self.used_arms |= self.grasp_seconds >= .1 - 1e-9
+        second_arm = bool(self.used_arms.all() and not previously_both)
+        bottom = info['payload_position'][2] - info['vertical_half_extent']
+        lifting = bottom >= .63 and bool(np.any(self.grasp_seconds >= .1-1e-9))
+        self.lift_seconds = min(.2, self.lift_seconds+self.dt) if lifting else 0.
+        if self.lift_seconds >= .2-1e-9:
+            self.carried = True
+            self.episode_lifted = True
+        if info['table_support'] and not info['inside_goal']:
+            self.carried = False
+        self.success_steps = self.success_steps+1 if self._goal_reached(info) else 0
+        success = self.success_steps*self.dt >= self._success_duration()-1e-9
+        fallen = bool(info['payload_position'][2] < .48)
+        terminated = fallen or success
+        truncated = self.steps >= self.max_steps and not terminated
+        potential = 0. if terminated else self._potential(info)
+        scales = self._cost_scales()
+        costs = {
+            'shaping': self.reward_gamma*potential-self.previous_potential,
+            'success': 100. if success else 0.,
+            'fall': -25. if fallen else 0.,
+            'second_arm': -10.*scales['second_arm'] if second_arm else 0.,
+            'torque': -.1*scales['effort']*torque_integral,
+            'gripper': -.025*scales['effort']*grip_integral,
+            'collision': -.5*self.dt*(info['obstacle_contacts']+info['arm_contacts']),
+            'time': -.02*scales['time']*self.dt,
+        }
+        self.previous_potential = potential
+        reward = float(sum(costs.values()))
+        self.episode_effort += torque_integral + .25*grip_integral
+        self.episode_return += reward
+        info.update(is_success=success, fallen=fallen, reward_terms=costs,
+                    torque_integral=torque_integral, gripper_integral=grip_integral,
+                    episode_effort=self.episode_effort, episode_return=self.episode_return,
+                    episode_lifted=self.episode_lifted,
+                    used_arms=self.used_arms.copy(), carried=self.carried,
+                    lift_seconds=self.lift_seconds, collision_total=self.collision_total,
+                    success_hold_seconds=self.success_steps*self.dt)
+        return self._observation(), reward, terminated, truncated, info
 
     def _observation(self):
         return np.concatenate([self.data.qpos, self.data.qvel, self.goal,
             self.data.site_xpos[self.sites].ravel(), self.data.geom_xpos[self.obstacle_geom],
             self.model.geom_size[self.obstacle_geom], [self.mass],
-            self.model.geom_size[self.payload_geom]]).astype(np.float32)
+            self.model.geom_size[self.payload_geom], self.target_action,
+            [self.lift_seconds/.2], self.grasp_seconds/.1, self.used_arms.astype(float),
+            [float(self.carried), self.success_steps*self.dt]]).astype(np.float32)
+
+    def get_state(self):
+        """Complete integration + task state for exact rollout-boundary resume."""
+        import copy
+        spec = mujoco.mjtState.mjSTATE_INTEGRATION
+        physics = np.empty(mujoco.mj_stateSize(self.model, spec))
+        mujoco.mj_getState(self.model, self.data, physics, spec)
+        names = ('start', 'goal', 'obstacle_position', 'target_action', 'steps',
+                 'success_steps', 'collision_total', 'lift_seconds', 'grasp_seconds',
+                 'used_arms', 'carried', 'episode_lifted', 'episode_effort', 'episode_return', 'previous_potential')
+        return {'physics': physics, 'rng': copy.deepcopy(self.np_random.bit_generator.state),
+                'task': {name: copy.deepcopy(getattr(self, name)) for name in names},
+                'model': {name: getattr(self.model, name).copy() for name in
+                          ('geom_size', 'site_pos', 'site_size', 'body_mass', 'body_inertia')}}
+
+    def set_state(self, state):
+        import copy
+        for name, value in state['model'].items():
+            getattr(self.model, name)[:] = value
+        mujoco.mj_setConst(self.model, self.data)
+        for name, value in state['task'].items():
+            setattr(self, name, copy.deepcopy(value))
+        self.np_random.bit_generator.state = copy.deepcopy(state['rng'])
+        mujoco.mj_setState(self.model, self.data, state['physics'], mujoco.mjtState.mjSTATE_INTEGRATION)
+        mujoco.mj_forward(self.model, self.data)
+        return self._observation()
 
     def info(self):
         position = self.data.xpos[self.payload_id].copy()
@@ -300,7 +394,7 @@ class DualReacherEnv(gym.Env):
         pad_contacts = {'left': set(), 'right': set()}
         arm_contacts = 0
         table_support = False
-        for contact in self.data.contact[:self.data.ncon]:
+        for contact_index, contact in enumerate(self.data.contact[:self.data.ncon]):
             pair = {int(contact.geom1), int(contact.geom2)}
             names = [mujoco.mj_id2name(self.model,mujoco.mjtObj.mjOBJ_GEOM,g) or '' for g in (int(contact.geom1),int(contact.geom2))]
             if any(n.startswith('left_') for n in names) and any(n.startswith('right_') for n in names):
@@ -310,22 +404,24 @@ class DualReacherEnv(gym.Env):
             if self.payload_geom in pair:
                 other = next((g for g in pair if g != self.payload_geom), self.payload_geom)
                 name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, other) or ''
-                if '_pad_' in name:
+                contact_force = np.zeros(6)
+                mujoco.mj_contactForce(self.model, self.data, contact_index, contact_force)
+                if '_pad_' in name and contact_force[0] > .5:
                     finger_contacts.add(name.split('_')[0])
                     pad_contacts[name.split('_')[0]].add(name.rsplit('_',1)[-1])
-                table_support |= name == 'table'
+                table_support |= name == 'table' and contact_force[0] > .1
         distance = float(np.linalg.norm(position-self.goal))
         jid = self.id(mujoco.mjtObj.mjOBJ_JOINT, 'payload_free')
         d = self.model.jnt_dofadr[jid]
         speed = np.linalg.norm(self.data.qvel[d:d+6])
-        opens = [float(self.data.qpos[q]) for q in self.finger_joints]
         rotation = self.data.xmat[self.payload_id].reshape(3,3)
         grasped = tuple(len(pad_contacts[side]) == 2 for side in ('left','right'))
         tilt = float(np.degrees(np.arccos(np.clip(rotation[2,2],-1,1))))
         footprint = np.abs(rotation) @ self.model.geom_size[self.payload_geom]
         inside_goal = bool(np.all(np.abs(position[:2]-self.goal[:2])+footprint[:2] <=
                                   self.model.site_size[self.goal_site,:2]+.002))
-        placed = bool(distance < .04 and speed < .08 and min(opens) > .032 and
+        # Physical release matters; an unused, empty gripper may remain closed.
+        placed = bool(distance < .04 and speed < .08 and not finger_contacts and
                       table_support and tilt < 12 and inside_goal and not any(grasped))
         return {'payload_position': position, 'goal_distance': distance,
                 'task': self.task, 'start': self.start.copy(), 'goal': self.goal.copy(),
@@ -338,7 +434,9 @@ class DualReacherEnv(gym.Env):
                 'collision_total': getattr(self,'collision_total',0),
                 'payload_mass': self.mass, 'weight_newtons': self.mass*abs(self.model.opt.gravity[2]),
                 'obstacle_contacts': obstacle_contacts, 'gripping_arms': len(finger_contacts),
-                'placed': placed,
+                'placed': placed, 'table_support': bool(table_support),
+                'vertical_half_extent': float(footprint[2]),
+                'gripper_force': self.data.actuator_force[[6,13]].copy(),
                 'motor_torque': self.data.qfrc_actuator[self.ball_dofs].copy(),
                 'mechanical_power': float(np.dot(self.data.qfrc_actuator[self.ball_dofs], self.data.qvel[self.ball_dofs]))}
 

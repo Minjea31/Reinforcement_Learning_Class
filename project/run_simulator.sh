@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
-exec .venv/bin/python -B simulator.py "$@"
+source ./conda_python.sh
+exec "$python_bin" -B simulator.py "$@"
