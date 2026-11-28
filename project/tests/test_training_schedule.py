@@ -8,10 +8,35 @@ import unittest
 import numpy as np
 import torch
 
-from training_schedule import StageHandoff
+from training.schedule import StageHandoff
 
 
 class HandoffTests(unittest.TestCase):
+    def test_fresh_one_kg_stage_one_uses_new_model_and_matching_physics(self):
+        root=Path(__file__).resolve().parents[1]
+        process_env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1')
+        with tempfile.TemporaryDirectory() as directory:
+            run=Path(directory)/'fresh'
+            result=subprocess.run([sys.executable,'-B','-m','training.train','--stage','1','--task-version','2',
+                '--payload-mass','1','--layout-mode','random_separated','--total-steps','8','--num-envs','1',
+                '--rollout-steps','4','--batch-size','4','--epochs','1','--max-steps','4',
+                '--eval-every','100','--eval-episodes','1','--final-eval-episodes','0',
+                '--record-every','0','--no-report','--run-dir',str(run),'--device','cpu'],
+                cwd=root,env=process_env,capture_output=True,text=True,timeout=60)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            checkpoint=torch.load(run/'latest.pt',map_location='cpu',weights_only=False)
+            self.assertEqual(checkpoint['steps'],8)
+            self.assertIsNone(checkpoint['config']['resume'])
+            self.assertEqual(checkpoint['env_config']['payload_mass'],1.)
+            self.assertEqual(checkpoint['curriculum']['stage'],1)
+            from simulation.curriculum import make_env
+            env=make_env(checkpoint['env_config'])
+            try:
+                self.assertEqual(env.mass,1.)
+                _,info=env.reset(seed=1);self.assertEqual(info['weight_newtons'],9.81)
+                env.set_state(checkpoint['worker_states'][0]);self.assertEqual(env.mass,1.)
+            finally:env.close()
+
     def test_fixed_budget_and_completed_schedule(self):
         plan=StageHandoff(1,20_000_000,2,20_000_000)
         self.assertFalse(plan.due(1,19_999_992))
@@ -41,7 +66,7 @@ class HandoffTests(unittest.TestCase):
         env=os.environ.copy()
         env.update(OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1')
         def train(*args):
-            result=subprocess.run([sys.executable,'-B','train.py',*args],cwd=root,env=env,
+            result=subprocess.run([sys.executable,'-B','-m','training.train','--no-report',*args],cwd=root,env=env,
                 capture_output=True,text=True,timeout=90)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         def load(path):return torch.load(path,map_location='cpu',weights_only=False)

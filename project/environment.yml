@@ -7,4 +7,4 @@ dependencies:
   - tk
   - pip:
       - --extra-index-url https://download.pytorch.org/whl/cu124
-      - -r requirements.txt
+      - -r requirements-study.txt

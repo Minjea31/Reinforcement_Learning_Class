@@ -2,9 +2,9 @@ import unittest
 import numpy as np
 import torch
 from torch.distributions import Normal, TransformedDistribution, TanhTransform
-from dual_reacher import DualReacherEnv
-from ppo import ActorCritic, compute_gae
-from evaluate import ranking
+from simulation.dual_reacher import DualReacherEnv
+from training.ppo import ActorCritic, compute_gae
+from evaluation.evaluate import ranking
 
 
 class PPOTests(unittest.TestCase):
@@ -25,8 +25,8 @@ class PPOTests(unittest.TestCase):
 
     @unittest.skipUnless(torch.cuda.is_available(), 'CUDA device unavailable')
     def test_cuda_policy_update_and_evaluation(self):
-        from evaluate import evaluate_policy
-        from ppo import RunningNorm
+        from evaluation.evaluate import evaluate_policy
+        from training.ppo import RunningNorm
         torch.set_num_threads(1)
         policy = ActorCritic(89).to('cuda')
         observations = torch.zeros(8,89,device='cuda')
@@ -86,7 +86,7 @@ class EnvironmentTests(unittest.TestCase):
 
     def test_default_mass_and_static_effort(self):
         e = self.env
-        self.assertEqual(e.mass,5.)
+        self.assertEqual(e.mass,1.)
         obs, reward, _, _, info = e.step(e.target_action)
         self.assertEqual(obs.shape,(89,))
         self.assertTrue(np.isfinite(obs).all())

@@ -2,7 +2,7 @@
 import multiprocessing as mp
 import traceback
 import numpy as np
-from curriculum import make_env
+from simulation.curriculum import make_env
 
 
 def worker(connection, seed, max_steps, gamma, env_config=None):
@@ -105,3 +105,28 @@ class RolloutWorkers:
                 process.join()
         for pipe in self.pipes:
             pipe.close()
+
+
+class SingleRollout:
+    """One environment in the trainer process, sharing its CUDA device."""
+    def __init__(self,seed,max_steps,gamma,env_config):
+        self.env=make_env(env_config,max_steps=max_steps,reward_gamma=gamma)
+        self.obs=self.env.reset(seed=seed)[0][None]
+
+    def step(self,actions,snapshot=False):
+        obs,reward,term,trunc,info=self.env.step(actions[0])
+        final_obs=obs.copy()
+        state=self.env.get_state() if snapshot else None
+        if term or trunc:obs=self.env.reset()[0]
+        self.obs=obs[None]
+        return [(obs,final_obs,reward,term,trunc,info,state)]
+
+    def configure(self,env_config):self.obs=self.env.configure(env_config)[None]
+
+    def states(self):return [self.env.get_state()]
+
+    def restore(self,states):
+        if len(states)!=1:raise ValueError('Single GPU simulation requires one saved environment state')
+        self.obs=self.env.set_state(states[0])[None]
+
+    def close(self):self.env.close()

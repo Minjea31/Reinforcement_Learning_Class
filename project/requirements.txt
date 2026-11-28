@@ -4,3 +4,6 @@ numpy==2.2.6
 
 torch==2.5.1
 pillow==11.3.0
+matplotlib==3.10.8
+keyring>=25,<26
+secretstorage>=3.3,<4

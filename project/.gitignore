@@ -1,9 +1,9 @@
-.venv/
 __pycache__/
 *.py[cod]
 runs/
-.venv-cuda/
+runtime/
 replay_site/
+models/first_trial/
 *.sock
 
 # Trained weights and generated recordings

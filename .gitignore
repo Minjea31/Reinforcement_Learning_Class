@@ -20,3 +20,21 @@ GEMINI.md
 .github/copilot-instructions.md
 .github/instructions/
 .github/prompts/
+
+# Reinforcement learning runs and local simulator output
+/project/runs/
+/project/runtime/
+/project/replay_site/
+/project/models/first_trial/
+/project/MUJOCO_LOG.TXT
+/project/**/*.pt
+/project/**/*.pth
+/project/**/*.ckpt
+/project/**/*.onnx
+/project/**/*.safetensors
+/project/**/*.mp4
+/project/**/*.webm
+/project/**/*.log
+/project/**/*.pid
+/project/**/*.sock
+/project/**/__pycache__/

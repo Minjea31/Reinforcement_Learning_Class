@@ -12,7 +12,7 @@ import mujoco
 import numpy as np
 from gymnasium import spaces
 
-MODEL_PATH = Path(__file__).parent / "models" / "dual_reacher.xml"
+MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "dual_reacher.xml"
 MAX_ROT = 2.75
 
 
@@ -36,7 +36,7 @@ def quat_rotvec(quat):
 class DualReacherEnv(gym.Env):
     metadata = {"render_modes": ["rgb_array"], "render_fps": 50}
 
-    def __init__(self, render_mode=None, payload_mass=5.0, max_steps=2000,
+    def __init__(self, render_mode=None, payload_mass=1.0, max_steps=2000,
                  task='random', randomize=True, reward_gamma=.999):
         super().__init__()
         self.model = mujoco.MjModel.from_xml_path(str(MODEL_PATH))
@@ -44,6 +44,7 @@ class DualReacherEnv(gym.Env):
         self.ik_data = mujoco.MjData(self.model)
         self.render_mode = render_mode
         self.renderer = None
+        self.physics = None
         self.max_steps = max_steps
         self.reward_gamma = reward_gamma
         if task != 'random':
@@ -153,6 +154,7 @@ class DualReacherEnv(gym.Env):
         raise ValueError('Could not generate non-overlapping tabletop start and goal')
 
     def reset(self, *, seed=None, options=None):
+        if self.physics is not None:self.physics.invalidate()
         super().reset(seed=seed)
         options = options or {}
         selection = options.get('task', self.task_selection)
@@ -295,11 +297,8 @@ class DualReacherEnv(gym.Env):
     def _cost_scales(self):
         return dict(effort=1.,second_arm=1.,time=1.)
 
-    def step(self, action):
-        action = np.asarray(action, dtype=float)
-        if action.shape != (14,) or not np.isfinite(action).all():
-            raise ValueError("Action must contain 14 finite numbers")
-        self.target_action = np.clip(action, -1, 1)
+    def _advance_physics(self):
+        if self.physics is not None:return self.physics.advance(self.target_action)
         torque_integral = grip_integral = 0.
         for _ in range(self.frame_skip):
             self._control(self.target_action)
@@ -308,6 +307,14 @@ class DualReacherEnv(gym.Env):
             torque_integral += float(np.abs(self.data.qfrc_actuator[self.ball_dofs]).mean()/65.) * self.model.opt.timestep
             grip_integral += float(np.abs(self.data.actuator_force[[6, 13]]).mean()/200.) * self.model.opt.timestep
         mujoco.mj_forward(self.model, self.data)
+        return torque_integral,grip_integral
+
+    def step(self, action):
+        action = np.asarray(action, dtype=float)
+        if action.shape != (14,) or not np.isfinite(action).all():
+            raise ValueError("Action must contain 14 finite numbers")
+        self.target_action = np.clip(action, -1, 1)
+        torque_integral,grip_integral = self._advance_physics()
         self.steps += 1
         info = self.info()
         self.collision_total += info['obstacle_contacts'] + info['arm_contacts']
@@ -344,13 +351,16 @@ class DualReacherEnv(gym.Env):
         reward = float(sum(costs.values()))
         self.episode_effort += torque_integral + .25*grip_integral
         self.episode_return += reward
-        info.update(is_success=success, fallen=fallen, reward_terms=costs,
+        info.update(is_success=success, fallen=fallen, episode_step=self.steps,reward_terms=costs,
                     torque_integral=torque_integral, gripper_integral=grip_integral,
                     episode_effort=self.episode_effort, episode_return=self.episode_return,
                     episode_lifted=self.episode_lifted,
                     used_arms=self.used_arms.copy(), carried=self.carried,
                     lift_seconds=self.lift_seconds, collision_total=self.collision_total,
                     success_hold_seconds=self.success_steps*self.dt)
+        if self.physics is not None:
+            info.update(physics_backend='warp',physics_device=str(self.physics.device),
+                        physics_substeps=self.physics.substeps)
         return self._observation(), reward, terminated, truncated, info
 
     def _observation(self):
@@ -377,6 +387,7 @@ class DualReacherEnv(gym.Env):
 
     def set_state(self, state):
         import copy
+        if self.physics is not None:self.physics.invalidate()
         for name, value in state['model'].items():
             getattr(self.model, name)[:] = value
         mujoco.mj_setConst(self.model, self.data)
@@ -451,6 +462,7 @@ class DualReacherEnv(gym.Env):
         return self.renderer.render()
 
     def close(self):
+        if self.physics is not None:self.physics.close()
         if self.renderer is not None:
             self.renderer.close()
             self.renderer = None

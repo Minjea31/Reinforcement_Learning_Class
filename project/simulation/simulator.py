@@ -15,13 +15,13 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 
-from dual_reacher import DualReacherEnv, MAX_ROT
+from simulation.dual_reacher import DualReacherEnv, MAX_ROT
 
 TASK_LABELS = {'Random start / goal':'random'}
 
 
 class Simulator:
-    def __init__(self, mass=5., task='random', seed=0):
+    def __init__(self, mass=1., task='random', seed=0):
         self.env = DualReacherEnv(payload_mass=mass,task=task)
         self.env.reset(seed=seed)
         self.root = tk.Tk()
@@ -251,7 +251,7 @@ class Simulator:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mass',type=float,default=5.,help='Payload mass in kg, 0.05–5')
+    parser.add_argument('--mass',type=float,default=1.,help='Payload mass in kg, 0.05–5')
     parser.add_argument('--task',choices=list(TASK_LABELS.values()),default='random',
                         help='Randomize positions without assigning an arm or strategy (default)')
     parser.add_argument('--seed',type=int,default=0)

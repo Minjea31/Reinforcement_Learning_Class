@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
-source ./conda_python.sh
-exec "$python_bin" -B live_access.py launch "$@"
+source ./scripts/conda_python.sh
+exec "$python_bin" -B -m web.live_access launch "$@"

@@ -1,0 +1,10 @@
+name: dual-reacher-gpu
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - tk
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu124
+      - -r requirements-gpu.txt

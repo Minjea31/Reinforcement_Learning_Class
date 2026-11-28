@@ -5,9 +5,9 @@ import time
 from pathlib import Path
 import numpy as np
 import torch
-from curriculum import make_env, STAGE_NAMES
-from ppo import ActorCritic, RunningNorm, load_checkpoint, resolve_device
-from training_viewer import TrainingViewer
+from simulation.curriculum import make_env, STAGE_NAMES
+from training.ppo import ActorCritic, RunningNorm, load_checkpoint, resolve_device
+from simulation.viewer import TrainingViewer
 
 # Training uses seeds below this boundary; validation and final test are disjoint.
 VALIDATION_SEED = 1_000_000_000
@@ -26,20 +26,33 @@ def evaluate_policy(policy, normalizer, episodes, seed, max_steps, gamma=.999, v
     try:
         for episode in range(episodes):
             obs, _ = env.reset(seed=seed+episode)
+            reached=released=placed=False
+            progress=0.
+            release_losses=0
             for step in range(env.max_steps):
                 if stop_requested is not None and stop_requested():
                     return None
                 with torch.no_grad():
                     action = policy.sample(torch.as_tensor(normalizer(obs)[None],device=device), deterministic=True)[0][0].cpu().numpy()
                 obs, reward, terminated, truncated, info = env.step(action)
+                reached|=bool(info['carried'] and info['inside_goal'])
+                released|=bool(info['carried'] and info['inside_goal'] and info.get('payload_robot_contacts',info['gripping_arms'])==0)
+                placed|=bool(info['carried'] and info['placed'])
+                progress=max(progress,info.get('episode_goal_progress',0.))
+                release_losses+=int(info.get('premature_release',False))
                 if viewer is not None and viewer.ready():
                     viewer.send(env.get_state(), f'Evaluation seed {seed+episode}\nStep {step+1}  reward {reward:.3f}\nSuccess {info["is_success"]}  used arms {info["used_arms"].astype(int)}\nEffort {info["episode_effort"]:.3f}\nTorques Nm {np.round(info["motor_torque"],1)}\nGripper N {np.round(info["gripper_force"],1)}')
                 if terminated or truncated:
                     break
-            records.append(dict(seed=seed+episode, success=bool(info['is_success']),
+            records.append(dict(episode=episode+1,seed=seed+episode, success=bool(info['is_success']),
                                 used_arms=int(info['used_arms'].sum()), effort=float(info['episode_effort']),
                                 episode_return=float(info['episode_return']), steps=step+1,
-                                grasped=bool(info['used_arms'].any()),lifted=bool(info['episode_lifted'])))
+                                grasped=bool(info['used_arms'].any()),lifted=bool(info['episode_lifted']),
+                                goal_reached=reached,released_in_goal=released,placed=placed,
+                                goal_progress=progress,premature_releases=release_losses,
+                                pickup_steps=info.get('pickup_steps',0)))
+            if (env_config or {}).get('arm_mask'):
+                records[-1]['initial_side'] = 'left' if env.initial_side == 0 else 'right'
             completed = episode+1
             if progress_label and (completed % 5 == 0 or completed == episodes):
                 successes = sum(r['success'] for r in records)
@@ -53,15 +66,39 @@ def evaluate_policy(policy, normalizer, episodes, seed, max_steps, gamma=.999, v
     result = dict(env_config=env_config,episodes=episodes,
                   grasp_rate=float(np.mean([r['grasped'] for r in records])),
                   lift_rate=float(np.mean([r['lifted'] for r in records])), success_rate=len(successes)/episodes,
+                  goal_reach_rate=float(np.mean([r['goal_reached'] for r in records])),
+                  release_rate=float(np.mean([r['released_in_goal'] for r in records])),
+                  placement_rate=float(np.mean([r['placed'] for r in records])),
+                  mean_goal_progress=float(np.mean([r['goal_progress'] for r in records])),
+                  mean_premature_releases=float(np.mean([r['premature_releases'] for r in records])),
                   successful_used_arms=float(np.mean([r['used_arms'] for r in successes])) if successes else None,
                   successful_effort=float(np.mean([r['effort'] for r in successes])) if successes else None,
                   mean_return=float(np.mean([r['episode_return'] for r in records])), records=records)
+    if (env_config or {}).get('arm_mask'):
+        for side in ('left', 'right'):
+            cases = [r for r in records if r['initial_side'] == side]
+            if cases:
+                result[f'{side}_success_rate'] = float(np.mean([r['success'] for r in cases]))
+                result[f'{side}_grasp_rate'] = float(np.mean([r['grasped'] for r in cases]))
     return result
 
 
 def ranking(result):
     return (result['success_rate'], -(result['successful_used_arms'] or 0),
             -(result['successful_effort'] or 0), result['mean_return'])
+
+
+def curriculum_ranking(result,stage,task_version=1):
+    if stage==4:return ranking(result)
+    if task_version==2 and stage==1:
+        # Before the first complete success, retain real pickup progress rather
+        # than preferring a stationary timeout with a less negative raw return.
+        return (result['success_rate'],result.get('lift_rate',0.),
+                result.get('grasp_rate',0.),result['mean_return'])
+    if task_version==2 and stage>=2:
+        return (result['success_rate'],result['placement_rate'],result['release_rate'],
+                result['goal_reach_rate'],result['mean_goal_progress'],result['mean_return'])
+    return (result['success_rate'],0.,0.,result['mean_return'])
 
 
 def main():
@@ -92,7 +129,7 @@ def main():
     if args.stage is not None:
         if env_config is None:
             parser.error('--stage requires a curriculum checkpoint')
-        env_config = dict(stage=args.stage,difficulty=1.,effort_scale=1. if args.stage==4 else 0.)
+        env_config = dict(env_config,stage=args.stage,difficulty=1.,effort_scale=1. if args.stage==4 else 0.)
     viewer = TrainingViewer(args.viewer, 'PPO: actual evaluation trajectory')
     try:
         result = evaluate_policy(policy, norm, args.episodes, args.seed,

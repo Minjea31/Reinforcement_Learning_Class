@@ -91,7 +91,7 @@
     </body>
     <body name="payload" pos="0 -0.28 0.627">
       <freejoint name="payload_free"/>
-      <geom name="payload_geom" type="box" size="0.28 0.035 0.025" mass="5" rgba="0.92 0.76 0.25 1" friction="2 0.015 0.001"/>
+      <geom name="payload_geom" type="box" size="0.28 0.035 0.025" mass="1" rgba="0.92 0.76 0.25 1" friction="2 0.015 0.001"/>
       <site name="payload_left" pos="-0.21 0 0" size="0.004" rgba="1 1 1 1"/>
       <site name="payload_right" pos="0.21 0 0" size="0.004" rgba="1 1 1 1"/>
     </body>

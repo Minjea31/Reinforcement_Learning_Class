@@ -2,8 +2,8 @@ import unittest
 import mujoco
 import numpy as np
 import torch
-from curriculum import Curriculum, CurriculumReacherEnv
-from ppo import ActorCritic, RunningNorm
+from simulation.curriculum import Curriculum, CurriculumReacherEnv
+from training.ppo import ActorCritic, RunningNorm
 
 
 class CurriculumTests(unittest.TestCase):
@@ -19,7 +19,7 @@ class CurriculumTests(unittest.TestCase):
         for _ in range(19):
             c.observe(1.,1000,required=1,min_steps=0)
         self.assertTrue(c.completed)
-        self.assertEqual(c.env_config(),dict(stage=4,difficulty=1.,effort_scale=1.))
+        self.assertEqual(c.env_config(),dict(stage=4,difficulty=1.,effort_scale=1.,payload_mass=1.))
 
     def test_locked_stage_keeps_training_without_promoting_to_stage_two(self):
         c=Curriculum(stage=1)
@@ -108,7 +108,7 @@ class CurriculumTests(unittest.TestCase):
                     if term:break
                 self.assertTrue(info['is_success'])
                 self.assertTrue(info['episode_lifted'])
-                self.assertEqual(info['payload_mass'],5.)
+                self.assertEqual(info['payload_mass'],1.)
                 self.assertFalse(info['placed'])
             finally:env.close()
 
@@ -153,7 +153,7 @@ class CurriculumTests(unittest.TestCase):
                 starts.append(env.start.copy())
                 self.assertTrue(env.random_episode)
                 self.assertLess(abs(env.obstacle_position[0]),1.)
-                self.assertEqual(env.mass,5.)
+                self.assertEqual(env.mass,1.)
             self.assertGreater(np.ptp(np.array(starts)[:,0]),.6)
         finally:env.close()
 

@@ -7,12 +7,13 @@ import time
 
 
 def _publisher(messages,origin,token,run_dir,stream_port=0,stream_token=None):
+    os.environ.setdefault('LP_NUM_THREADS','2')
     import base64,io,json,signal,threading
     from urllib import request,error
     import mujoco
     from PIL import Image
-    from dual_reacher import DualReacherEnv
-    from live_stream import FrameHub,start_stream
+    from simulation.dual_reacher import DualReacherEnv
+    from web.live_stream import FrameHub,start_stream
     signal.signal(signal.SIGINT,signal.SIG_IGN)
     class NoRedirect(request.HTTPRedirectHandler):
         def redirect_request(self,*args,**kwargs):return None

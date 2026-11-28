@@ -9,7 +9,7 @@ def _display(frames, title):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     import mujoco
     import mujoco.viewer
-    from curriculum import make_env
+    from simulation.curriculum import make_env
     env = make_env()
     try:
         with mujoco.viewer.launch_passive(env.model, env.data) as viewer:

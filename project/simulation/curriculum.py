@@ -2,7 +2,7 @@
 from dataclasses import asdict, dataclass
 import numpy as np
 import mujoco
-from dual_reacher import DualReacherEnv
+from simulation.dual_reacher import DualReacherEnv
 
 STAGE_NAMES = {1:'grasp_and_lift',2:'pick_and_place',3:'random_scenarios',4:'minimum_effort'}
 LEVELS = (0., .25, .5, .75, 1.)
@@ -16,11 +16,21 @@ class Curriculum:
     level_start_steps: int = 0
     completed: bool = False
     stage_complete: bool = False
+    task_version: int = 1
+    pickup_checkpoint: str | None = None
+    physics_backend: str = 'cpu'
+    layout_mode: str = 'fixed'
+    payload_mass: float = 1.
 
     def env_config(self):
         progress = LEVELS[self.level]
-        return dict(stage=self.stage,difficulty=progress if self.stage < 4 else 1.,
-                    effort_scale=progress if self.stage == 4 else 0.)
+        config=dict(stage=self.stage,difficulty=progress if self.stage < 4 else 1.,
+                    effort_scale=progress if self.stage == 4 else 0.,payload_mass=self.payload_mass)
+        if self.task_version==2:
+            config.update(task_version=2,pickup_checkpoint=self.pickup_checkpoint)
+        if self.physics_backend!='cpu':config['physics_backend']=self.physics_backend
+        if self.layout_mode!='fixed':config['layout_mode']=self.layout_mode
+        return config
 
     def observe(self, success_rate, steps, threshold=.8, required=2, min_steps=100_000, locked_stage=None):
         if self.completed or (self.stage_complete and locked_stage == self.stage):
@@ -50,7 +60,7 @@ class Curriculum:
 
 
 class CurriculumReacherEnv(DualReacherEnv):
-    """5kg throughout; only resets/objectives change between learning stages.
+    """Use the configured payload mass throughout all learning stages.
 
     All 14 outputs are target increments. There is no IK or scripted controller
     during step(). IK prepares an ungrasped initial pose only during reset().
@@ -76,6 +86,7 @@ class CurriculumReacherEnv(DualReacherEnv):
             raise ValueError('Force and second-arm costs are enabled only in stage 4')
 
     def configure(self, config):
+        if 'payload_mass' in config:self.set_mass(config['payload_mass'])
         self.stage = int(config['stage'])
         self.difficulty = float(config['difficulty'])
         self.effort_scale = float(config['effort_scale'])
@@ -117,7 +128,7 @@ class CurriculumReacherEnv(DualReacherEnv):
         self.previous_potential = self._potential(self.info())
         return self._observation(),self.info()
 
-    def step(self, action):
+    def _incremental_targets(self, action):
         action = np.asarray(action,dtype=float)
         if action.shape != (14,) or not np.isfinite(action).all():
             raise ValueError('Action must contain 14 finite increments')
@@ -127,7 +138,10 @@ class CurriculumReacherEnv(DualReacherEnv):
             length = np.linalg.norm(targets[start:start+3])
             if length > 1:
                 targets[start:start+3] /= length
-        return super().step(targets)
+        return targets
+
+    def step(self, action):
+        return super().step(self._incremental_targets(action))
 
     def _goal_reached(self, info):
         if self.stage == 1:
@@ -179,4 +193,20 @@ class CurriculumReacherEnv(DualReacherEnv):
 
 
 def make_env(env_config=None, **kwargs):
-    return CurriculumReacherEnv(**env_config,**kwargs) if env_config is not None else DualReacherEnv(**kwargs)
+    config=dict(env_config) if env_config is not None else None
+    backend=config.pop('physics_backend','cpu') if config is not None else kwargs.pop('physics_backend','cpu')
+    if backend not in ('cpu','warp'):raise ValueError('Unsupported physics backend')
+    if config is not None and config.get('reward_scheme')=='reviewed':
+        from simulation.study_curriculum import StudyCurriculumEnv
+        env=StudyCurriculumEnv(**config,**kwargs)
+    elif config is not None and config.get('task_version',1)==2:
+        from simulation.placement_curriculum import PlacementCurriculumEnv
+        env=PlacementCurriculumEnv(**config,**kwargs)
+    else:env=CurriculumReacherEnv(**config,**kwargs) if config is not None else DualReacherEnv(**kwargs)
+    if backend=='warp':
+        from simulation.warp_physics import WarpPhysics
+        try:env.physics=WarpPhysics(env)
+        except Exception:
+            env.close()
+            raise
+    return env

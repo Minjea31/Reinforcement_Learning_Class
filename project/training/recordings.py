@@ -18,13 +18,14 @@ class RecordingJobs:
     def __init__(self):self.jobs=[]
 
     def start(self,checkpoint,output,episodes,fps,milestone=None):
-        output=Path(output);output.mkdir(parents=True,exist_ok=True)
+        checkpoint=Path(checkpoint).resolve()
+        output=Path(output).resolve();output.mkdir(parents=True,exist_ok=True)
         if (output/'metadata.json').exists() and (output/'video.mp4').exists():return
         env=os.environ.copy();env.update(MUJOCO_GL='egl',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1')
-        command=[sys.executable,'-B',str(Path(__file__).with_name('record_policy.py')),'--checkpoint',str(checkpoint),
+        command=[sys.executable,'-B','-m','evaluation.record_policy','--checkpoint',str(checkpoint),
                  '--output',str(output),'--episodes',str(episodes),'--fps',str(fps)]
         if milestone is not None:command+=['--milestone',str(milestone)]
         with (output/'recording.log').open('ab') as log:
-            process=subprocess.Popen(command,env=env,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+            process=subprocess.Popen(command,cwd=Path(__file__).resolve().parents[1],env=env,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
         self.jobs=[job for job in self.jobs if job.poll() is None]+[process]
         (output/'recording.pid').write_text(str(process.pid)+'\n')
