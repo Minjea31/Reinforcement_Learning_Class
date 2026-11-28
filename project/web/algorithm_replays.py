@@ -30,14 +30,17 @@ def prepare(run, source=None):
 
 def mission_sources(run):
     sources = {}
-    current = run/'best'
-    if (current/'metadata.json').exists():
-        stage = json.loads((current/'metadata.json').read_text())['config']['stage']
-        sources[str(stage)] = current
-    for archive in sorted((run/'stage_checkpoints').glob('stage-*')):
-        if (archive/'metadata.json').exists() and not archive.name.endswith('.partial'):
-            sources.setdefault(archive.name.rsplit('-',1)[-1], archive)
-    return sources
+    candidates = [run/'best', *(run/'level_checkpoints').glob('stage-*/level-*'),
+                  *(run/'stage_checkpoints').glob('stage-*')]
+    for source in candidates:
+        if source.name.endswith('.partial') or not (source/'metadata.json').is_file():
+            continue
+        metadata = json.loads((source/'metadata.json').read_text())
+        config = metadata['config']
+        key = f'{config["stage"]}:{config["level"]}'
+        if key not in sources or metadata['steps'] > sources[key][0]:
+            sources[key] = (metadata['steps'],source)
+    return {key:source for key,(_,source) in sources.items()}
 
 
 def main():
@@ -46,7 +49,8 @@ def main():
     try:os.nice(10)
     except OSError:pass
     run=Path(args.run_dir);state_path=run/'mission_replays/published.json';state=json.loads(state_path.read_text()) if state_path.exists() else {}
-    stages = state.get('stages', {})
+    published = state.get('levels', {})
+    legacy = state.get('stages', {})
     stopped=False
     def stop(*_):
         nonlocal stopped
@@ -56,21 +60,21 @@ def main():
         alive=Path(f'/proc/{args.training_pid}').exists()
         try:
             sources = mission_sources(run)
-            for stage, source in sources.items():
+            for key, source in sources.items():
                 digest=bundle_digest(source)
-                old=stages.get(stage, state if state.get('hash')==digest else {})
+                fallback=legacy.get(key.split(':')[0], state)
+                old=published.get(key, fallback if fallback.get('hash')==digest else {})
                 if digest==old.get('hash') or (alive and time.time()-old.get('published_at',0)<=300):
+                    if digest==old.get('hash'):
+                        published[key]=old
                     continue
                 output,manifest=prepare(run, source)
                 if stopped:break
-                stage=str(manifest['stage'])
-                if source.name=='best' and stage in stages and stages[stage]['hash']==manifest['checkpoint_sha256']:
-                    continue
                 publish(run,output,manifest,args.connection_dir)
-                state=dict(hash=manifest['checkpoint_sha256'],published_at=time.time(),steps=manifest['checkpoint_steps'])
-                stages[stage]=state
-                atomic_json(state_path,dict(state,stages=stages))
-            if not alive and all(bundle_digest(source)==stages.get(stage,state).get('hash') for stage,source in sources.items()):
+                actual_key=f"{manifest['stage']}:{manifest['level']}"
+                published[actual_key]=dict(hash=manifest['checkpoint_sha256'],published_at=time.time(),steps=manifest['checkpoint_steps'])
+                atomic_json(state_path,dict(state,levels=published))
+            if not alive and all(bundle_digest(source)==published.get(key,{}).get('hash') for key,source in sources.items()):
                 break
         except Exception as exc:
             atomic_json(run/'replay_health.json',dict(status='retrying',error=type(exc).__name__,updated_at=time.time()))

@@ -7,6 +7,7 @@ import pickle
 from stable_baselines3 import A2C, PPO, SAC
 
 from simulation.curriculum import make_env
+from simulation.reward_design import STUDY_REWARD_VERSIONS
 
 
 class FrozenStudyPickup:
@@ -14,7 +15,7 @@ class FrozenStudyPickup:
         bundle = Path(bundle)
         metadata = json.loads((bundle/'metadata.json').read_text())
         config = metadata['env_config']
-        if config['stage'] != 1 or config.get('reward_scheme') != 'reviewed':
+        if config['stage'] != 1 or config.get('reward_scheme') not in STUDY_REWARD_VERSIONS:
             raise ValueError('Stage two requires a reviewed stage-one pickup checkpoint')
         self.source_steps = metadata['steps']
         self.source_hash = metadata['files']['model.zip']

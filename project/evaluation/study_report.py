@@ -77,6 +77,7 @@ def generate(run,live=False):
             generated_at=generation_time,figures=list(hashes),figure_hashes=hashes,generation=hashlib.sha256(json.dumps(hashes,sort_keys=True).encode()).hexdigest(),
             payload_mass=config['payload_mass'],task_version=2,layout_mode=config['layout_mode'])
         atomic_json(folder/'summary.json',summary)
-        reward={'reviewed_v4':'수정 보상 v4','reviewed_v3':'새 보상 v3'}.get(config.get('reward_version'),'기존 보상 v2')
+        reward = {'lift_progress_v1': '초기 들기 보상', 'grasp_progress_v1': '접근·파지 준비 보상', 'reviewed_v4': '수정 보상 v4',
+                  'reviewed_v3': '새 보상 v3'}.get(config.get('reward_version'), '기존 보상 v2')
         (folder/'presentation_notes.md').write_text(f'# {algorithm} 학습 자료\n\n- 환경 1개, 물체 {config["payload_mass"]}kg, 관측 105개·연속 행동 14개\n- 단계 {config["stage"]}, 난도 {config["level"]}/4, {reward}\n- 누적 {latest:,}스텝, 상태 {status["phase"]}\n- figures: 300dpi PNG·SVG, 원본 CSV 동봉\n- ../mission_replays: 평가 50회 중 상위 10개 영상·시작·최대 높이·종료 장면·보상 시계열\n- ../recordings: 설정한 주기별 평가 영상\n- 다른 모델의 승급과 독립적이다. 서로 다른 난도의 총보상이나 성공률은 같은 조건의 직접 비교가 아니다.\n- 보상만으로 성공을 판단하지 말고 검증 성공률·실제 잡기·들기·안착을 함께 확인한다.\n')
     atomic_json(run/'reports/index.json',dict(steps=latest,status=status['phase'],live=live,algorithm=config['algorithm'],generated_at=generation_time))

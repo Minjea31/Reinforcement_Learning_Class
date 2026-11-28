@@ -97,8 +97,38 @@ class StudyCurriculumTests(unittest.TestCase):
             np.testing.assert_array_equal(second.data.qpos,pose)
         finally:first.close();second.close()
 
+    def test_pregrasp_closing_and_contacts_use_physical_gates(self):
+        config = dict(stage=1, difficulty=0., task_version=2, layout_mode='progressive',
+                      reward_scheme='grasp_progress')
+        env = make_env(config)
+        try:
+            obs, info = env.reset(seed=31)
+            self.assertEqual(obs.shape, (105,))
+            self.assertEqual(info['reward_version'], 'grasp_progress_v1')
+            distance = np.array([.01, .2])
+            aligned = np.ones(2)
+            away = np.zeros(2)
+            no_contact = np.zeros((2, 2))
+            open_score = env._pregrasp_progress(distance, aligned, no_contact)
+            env.data.qpos[env.finger_joints] = .025
+            closing = env._pregrasp_progress(distance, aligned, no_contact)
+            self.assertGreater(closing[0], open_score[0])
+            self.assertEqual(closing[1], open_score[1])
+            self.assertEqual(env._pregrasp_progress(distance, away, no_contact), open_score)
+            self.assertEqual(env._pregrasp_progress(distance, aligned, [[10.,0.],[0.,0.]]), closing)
+            pair = env._pregrasp_progress(distance, aligned, [[.5,.5],[0.,0.]])
+            self.assertAlmostEqual(pair[0]-closing[0], 2.)
+            self.assertEqual(env._pregrasp_progress(distance, aligned, [[10.,10.],[0.,0.]]), pair)
+        finally:env.close()
+
     def test_both_arms_can_physically_succeed_under_the_new_reward(self):
-        config=dict(stage=1,difficulty=0.,effort_scale=0.,task_version=2,layout_mode='progressive',reward_scheme='reviewed')
+        for reward_scheme in ('reviewed', 'lift_progress'):
+            with self.subTest(reward_scheme=reward_scheme):
+                self.assert_physical_lift(reward_scheme)
+
+    def assert_physical_lift(self, reward_scheme):
+        config = dict(stage=1, difficulty=0., effort_scale=0., task_version=2,
+                      layout_mode='progressive', reward_scheme=reward_scheme)
         env=make_env(config)
         try:
             for seed in (0,1):

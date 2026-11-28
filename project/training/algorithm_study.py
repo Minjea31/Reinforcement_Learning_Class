@@ -20,6 +20,7 @@ import torch
 
 from evaluation.evaluate import evaluate_policy, curriculum_ranking
 from simulation.curriculum import make_env,Curriculum
+from simulation.reward_design import PREGRASP_REWARD_SCHEMES, STUDY_REWARD_VERSIONS
 from training.algorithms import ALGORITHMS, EpisodeSeeds, EvaluationPolicy, build_model
 from training.history import TrainingHistory, atomic_json
 from training.study_budget import learn_exact, restore_stage_start, stage_deadline, stage_progress
@@ -36,6 +37,7 @@ def parser():
     p.add_argument('--stage', type=int, choices=(1, 2, 3, 4), default=1)
     p.add_argument('--level', type=int, choices=range(5), default=0)
     p.add_argument('--layout-mode', choices=('fixed', 'random_separated', 'random_all', 'random_approach','progressive'), default='progressive')
+    p.add_argument('--reward-scheme', choices=STUDY_REWARD_VERSIONS, default='reviewed')
     p.add_argument('--payload-mass', type=float, default=1.)
     p.add_argument('--pickup-checkpoint', help='Common frozen native PPO .pt teacher for stage-two initial states')
     p.add_argument('--seed', type=int, default=31)
@@ -79,6 +81,8 @@ def validate(args):
         raise ValueError('Stage two needs a common frozen native --pickup-checkpoint')
     if args.auto_stages and (not args.auto_levels or args.layout_mode != 'progressive'):
         raise ValueError('--auto-stages needs progressive layouts and automatic levels')
+    if args.reward_scheme in PREGRASP_REWARD_SCHEMES and (args.layout_mode != 'progressive' or args.fixed_study_normalization):
+        raise ValueError('Grasp progress requires the progressive layout with both arms available')
     if args.seed < 0 or args.seed + args.total_steps >= 1_000_000_000:
         raise ValueError('Training reset seeds must remain below the held-out validation range')
     if args.fixed_study_normalization:
@@ -113,16 +117,20 @@ def save_bundle(run, model, normalizer, config, reset_seed, name,include_buffer=
     if backup.exists():shutil.rmtree(backup)
 
 
-def freeze_stage_policy(run, stage):
-    """Keep the trained policy from this run available after the mission changes."""
-    target = run/'stage_checkpoints'/f'stage-{stage}'
+def freeze_policy(run, target):
+    """Keep the best policy available after its stage or difficulty changes."""
     if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.with_suffix('.partial')
         if temporary.exists():
             shutil.rmtree(temporary)
         shutil.copytree(run/'best', temporary)
         os.replace(temporary, target)
     return target
+
+
+def freeze_stage_policy(run, stage):
+    return freeze_policy(run, run/'stage_checkpoints'/f'stage-{stage}')
 
 
 def apply_curriculum_config(config, controller, pickup_checkpoint):
@@ -153,9 +161,9 @@ def main():
     run.mkdir(parents=True,exist_ok=True)
     env_config = dict(stage=args.stage,difficulty=args.level/4.,effort_scale=args.level/4. if args.stage==4 else 0.,
                       task_version=2,pickup_checkpoint=args.pickup_checkpoint,layout_mode=args.layout_mode,payload_mass=args.payload_mass)
-    if args.layout_mode=='progressive':env_config['reward_scheme']='reviewed'
+    if args.layout_mode=='progressive':env_config['reward_scheme']=args.reward_scheme
     config = dict(vars(args),run_dir=str(run),resume=str(run/'latest') if args.resume else None,curriculum=True,num_envs=1,physics_backend='cpu',
-                  task_version=2,reward_version='reviewed_v4' if args.layout_mode=='progressive' else 'existing_v2',
+                  task_version=2,reward_version=STUDY_REWARD_VERSIONS[args.reward_scheme] if args.layout_mode=='progressive' else 'existing_v2',
                   policy_version='bounded_v2',normalization_version='bounded_task_state_v1',
                   observation_version='reward_state_v4',action_mode='continuous_14',
                   framework='sb3',web_run_name=args.web_run_name or args.study_id+'_'+args.algorithm,env_config=env_config)
@@ -295,6 +303,7 @@ def main():
                             locked_stage=None if args.auto_stages else stage,min_steps=args.min_level_steps):
                         # Save the validated state first so an interrupted reset can be resumed.
                         save_bundle(run,model,normalizer,config,raw.next_seed,'latest')
+                        freeze_policy(run, run/'level_checkpoints'/f'stage-{stage}'/f'level-{level}')
                         if candidate.stage != stage:
                             frozen_stage = freeze_stage_policy(run, stage)
                             config['stage_start_steps'] = model.num_timesteps

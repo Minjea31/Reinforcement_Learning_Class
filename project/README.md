@@ -28,6 +28,12 @@ conda activate dual-reacher
 
 완료된 모델은 건너뛰고 남은 모델만 재개합니다. 모델·옵티마이저·관측 정규화와 SAC 리플레이 버퍼를 복원하지만, 진행 중이던 물리 에피소드는 다음 초기화 시드로 새로 시작합니다. 난수 궤적까지 같은 재개는 보장하지 않습니다. 중단은 실행 터미널에서 Ctrl+C입니다.
 
+### PPO·A2C 파지 보상 비교
+
+두 팔을 처음부터 사용할 수 있는 1kg 환경에서 새 [접근·파지 준비 보상](reward.md)을 시험하려면 `./start_grasp_study.sh`를 실행합니다. PPO와 A2C 모두 관측 정규화 통계를 계속 갱신하고, 업데이트마다 환경 스텝 2,048개를 모읍니다. 기본 시험은 1단계 난이도 0에서 모델당 65,536스텝이며 `runs/studies/ppo_a2c_grasp_progress_pilot/`에 기록합니다. `./start_grasp_study.sh --full`은 별도 폴더 `runs/studies/ppo_a2c_grasp_progress/`에서 단계당 최대 1,000만 스텝으로 시작합니다. 같은 실행을 이어갈 때는 해당 명령 뒤에 `--resume`을 붙입니다. 브라우저와 로컬 창 없이 실행하려면 `--no-web --no-local-viewer`를 붙입니다.
+
+물체 바닥의 처음 3cm 들기를 더 크게 평가하는 보상은 `./start_grasp_study.sh --lift`로 시험합니다. 단기 실행은 모델당 65,536스텝을 `runs/studies/ppo_a2c_lift_progress_pilot/`에 저장합니다. `./start_grasp_study.sh --lift --full`은 모델당 단계별 최대 1,000만 스텝을 `runs/studies/ppo_a2c_lift_progress/`에 따로 저장합니다. 이어서 학습하려면 해당 명령 뒤에 `--resume`을 붙입니다.
+
 ## 웹에서 보기
 
 [기존 웹 주소](https://dual-reacher-best-replay.lunarknoll21.chatgpt.site/)에서 PPO·A2C·SAC를 선택합니다. 본인 계정 전용이며 다른 Wi-Fi에서도 접속할 수 있습니다.

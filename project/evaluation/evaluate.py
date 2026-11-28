@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from simulation.curriculum import make_env, STAGE_NAMES
+from simulation.reward_design import LIFT_SUCCESS_CLEARANCE, PREGRASP_REWARD_SCHEMES
 from training.ppo import ActorCritic, RunningNorm, load_checkpoint, resolve_device
 from simulation.viewer import TrainingViewer
 
@@ -16,6 +17,9 @@ TEST_SEED = 2_000_000_000
 
 def evaluate_policy(policy, normalizer, episodes, seed, max_steps, gamma=.999, viewer=None, stop_requested=None, progress_label='Evaluation', env_config=None):
     env = make_env(env_config,max_steps=max_steps,reward_gamma=gamma)
+    config = env_config or {}
+    track_lift_height = config.get('stage') == 1 and config.get('reward_scheme') in PREGRASP_REWARD_SCHEMES
+    track_start_side = bool(config.get('arm_mask')) or track_lift_height
     records = []
     device = next(policy.parameters()).device
     was_training = policy.training
@@ -29,6 +33,7 @@ def evaluate_policy(policy, normalizer, episodes, seed, max_steps, gamma=.999, v
             reached=released=placed=False
             progress=0.
             release_losses=0
+            max_gripped_clearance = 0.
             for step in range(env.max_steps):
                 if stop_requested is not None and stop_requested():
                     return None
@@ -40,6 +45,10 @@ def evaluate_policy(policy, normalizer, episodes, seed, max_steps, gamma=.999, v
                 placed|=bool(info['carried'] and info['placed'])
                 progress=max(progress,info.get('episode_goal_progress',0.))
                 release_losses+=int(info.get('premature_release',False))
+                if (track_lift_height and not info['table_support'] and not info['fallen']
+                        and (env.grasp_seconds >= .1-1e-9).any()):
+                    clearance = float(info['payload_position'][2]-info['vertical_half_extent']-.6)
+                    max_gripped_clearance = max(max_gripped_clearance, clearance)
                 if viewer is not None and viewer.ready():
                     viewer.send(env.get_state(), f'Evaluation seed {seed+episode}\nStep {step+1}  reward {reward:.3f}\nSuccess {info["is_success"]}  used arms {info["used_arms"].astype(int)}\nEffort {info["episode_effort"]:.3f}\nTorques Nm {np.round(info["motor_torque"],1)}\nGripper N {np.round(info["gripper_force"],1)}')
                 if terminated or truncated:
@@ -51,8 +60,11 @@ def evaluate_policy(policy, normalizer, episodes, seed, max_steps, gamma=.999, v
                                 goal_reached=reached,released_in_goal=released,placed=placed,
                                 goal_progress=progress,premature_releases=release_losses,
                                 pickup_steps=info.get('pickup_steps',0)))
-            if (env_config or {}).get('arm_mask'):
+            if track_start_side:
                 records[-1]['initial_side'] = 'left' if env.initial_side == 0 else 'right'
+            if track_lift_height:
+                records[-1].update(max_gripped_clearance=max_gripped_clearance,
+                                   reached_lift_height=max_gripped_clearance >= LIFT_SUCCESS_CLEARANCE-1e-9)
             completed = episode+1
             if progress_label and (completed % 5 == 0 or completed == episodes):
                 successes = sum(r['success'] for r in records)
@@ -74,7 +86,9 @@ def evaluate_policy(policy, normalizer, episodes, seed, max_steps, gamma=.999, v
                   successful_used_arms=float(np.mean([r['used_arms'] for r in successes])) if successes else None,
                   successful_effort=float(np.mean([r['effort'] for r in successes])) if successes else None,
                   mean_return=float(np.mean([r['episode_return'] for r in records])), records=records)
-    if (env_config or {}).get('arm_mask'):
+    if track_lift_height:
+        result['lift_height_rate'] = float(np.mean([r['reached_lift_height'] for r in records]))
+    if track_start_side:
         for side in ('left', 'right'):
             cases = [r for r in records if r['initial_side'] == side]
             if cases:

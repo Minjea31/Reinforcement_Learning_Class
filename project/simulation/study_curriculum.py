@@ -8,22 +8,35 @@ from simulation.arm_initialization import _home_action, randomize_arms
 from simulation.dual_reacher import MAX_ROT, quat_rotvec
 from simulation.layout_sampling import solo_layout
 from simulation.placement_curriculum import PlacementCurriculumEnv
-from simulation.reward_design import RewardState, compute_reward, lift_condition, placement_condition
+from simulation.reward_design import (PREGRASP_REWARD_SCHEMES, STUDY_REWARD_VERSIONS,
+                                      RewardState, compute_reward, lift_condition,
+                                      placement_condition)
 
 
 class StudyCurriculumEnv(PlacementCurriculumEnv):
-    REWARD_VERSION = 'reviewed_v4'
-
     def __init__(self,layout_mode='progressive',reward_scheme='reviewed',arm_mask=None,**kwargs):
-        if layout_mode!='progressive' or reward_scheme!='reviewed':raise ValueError('Unsupported study curriculum')
+        if layout_mode!='progressive' or reward_scheme not in STUDY_REWARD_VERSIONS:
+            raise ValueError('Unsupported study curriculum')
         if arm_mask not in (None, 'single', 'mixed', 'both'):
             raise ValueError('Invalid arm-mask mode')
+        if reward_scheme in PREGRASP_REWARD_SCHEMES and arm_mask is not None:
+            raise ValueError('Grasp progress uses both arms throughout the curriculum')
+        self.reward_scheme = reward_scheme
+        self.reward_version = STUDY_REWARD_VERSIONS[reward_scheme]
         self.arm_mask = arm_mask
         self._mask_reset_side = None
         self._mask_single = arm_mask == 'single'
         self._study_initializing=True
         self.lift_hold=0.;self.placement_hold=0.;self.qualified=False;self.ever_lifted=False
         super().__init__(layout_mode='random_all',**kwargs)
+        if reward_scheme in PREGRASP_REWARD_SCHEMES:
+            pads = np.array([[self.id(mujoco.mjtObj.mjOBJ_GEOM, f'{arm}_pad_{pad}')
+                              for pad in ('a', 'b')] for arm in ('left', 'right')])
+            finger_joints = [self.id(mujoco.mjtObj.mjOBJ_JOINT, f'{arm}_finger_{pad}_joint')
+                             for arm in ('left', 'right') for pad in ('a', 'b')]
+            pad_centers = self.model.body_pos[self.model.geom_bodyid[pads], 1]
+            self._closed_gap = np.abs(pad_centers[:, 0] - pad_centers[:, 1]) - self.model.geom_size[pads, 1].sum(axis=1)
+            self._open_gap = self._closed_gap + self.model.jnt_range[finger_joints, 1].reshape(2, 2).sum(axis=1)
         self._study_initializing=False
         self.reset()
 
@@ -109,10 +122,25 @@ class StudyCurriculumEnv(PlacementCurriculumEnv):
 
     def configure(self,config):
         values=dict(config)
-        values.pop('reward_scheme',None)
-        self.arm_mask = values.pop('arm_mask', self.arm_mask)
+        if values.pop('reward_scheme',self.reward_scheme) != self.reward_scheme:
+            raise ValueError('Cannot change the reward scheme during a study')
+        arm_mask = values.pop('arm_mask', self.arm_mask)
+        if self.reward_scheme in PREGRASP_REWARD_SCHEMES and arm_mask is not None:
+            raise ValueError('Grasp progress uses both arms throughout the curriculum')
+        self.arm_mask = arm_mask
         if values.get('layout_mode')=='progressive':values['layout_mode']='random_all'
         return super().configure(values)
+
+    def _pregrasp_progress(self, distances, alignments, pad_forces):
+        width = 2 * self.model.geom_size[self.payload_geom, 1]
+        gaps = self._closed_gap + self.data.qpos[self.finger_joints].reshape(2, 2).sum(axis=1)
+        closing = np.clip((self._open_gap-gaps)/np.maximum(self._open_gap-width, .001), 0., 1.)
+        alignment_floor = np.cos(np.pi/4)
+        aligned = np.clip((alignments-alignment_floor)/(1.-alignment_floor), 0., 1.)
+        close_to_target = np.clip(1.-distances/.04, 0., 1.)
+        approach = 4.*np.clip(1.-distances/.12, 0., 1.)**2
+        paired_contact = np.clip(np.min(pad_forces, axis=1)/.5, 0., 1.)
+        return tuple(approach + 3.*close_to_target*aligned*closing + 2.*paired_contact)
 
     def reward_state(self,info):
         rotation=self.data.xmat[self.payload_id].reshape(3,3)
@@ -120,8 +148,10 @@ class StudyCurriculumEnv(PlacementCurriculumEnv):
         hands=self.data.site_xpos[self.sites]
         distances=np.linalg.norm(hands[:,None,:]-points[None,:,:],axis=2).min(axis=1)
         axes=[self.data.site_xmat[s].reshape(3,3)[:,1] for s in self.sites]
-        alignments=[abs(float(np.dot(axis,rotation[:,1]))) for axis in axes]
-        return RewardState(tuple(distances),closing_alignments=tuple(np.clip(alignments,0.,1.)),
+        alignments=np.clip([abs(float(np.dot(axis,rotation[:,1]))) for axis in axes],0.,1.)
+        pregrasp = (self._pregrasp_progress(distances, alignments, info['pad_normal_forces'])
+                    if self.reward_scheme in PREGRASP_REWARD_SCHEMES and self.stage == 1 else (0., 0.))
+        return RewardState(tuple(distances),closing_alignments=tuple(alignments),pregrasp_progress=pregrasp,
             grasped=tuple(info['grasped']),grasp_seconds=tuple(self.grasp_seconds),used_arms=tuple(bool(v) for v in self.used_arms),
             clearance=float(info['payload_position'][2]-info['vertical_half_extent']-.6),lift_hold_seconds=self.lift_hold,
             carry_qualified=self.qualified,goal_distance=info['goal_distance'],initial_goal_distance=getattr(self,'initial_goal_distance',1.),
@@ -135,7 +165,7 @@ class StudyCurriculumEnv(PlacementCurriculumEnv):
         # Advance physics once, then calculate only this version's progress and
         # reward. Calling the legacy step also updated incompatible carry/goal
         # histories before our own task had assessed this transition.
-        before=self.reward_state(self.info())
+        before=self.reward_state(super().info())
         if self._mask_single:
             action = np.asarray(action, dtype=float).copy()
             if action.shape != (14,) or not np.isfinite(action).all():
@@ -145,7 +175,7 @@ class StudyCurriculumEnv(PlacementCurriculumEnv):
         self.target_action=self._incremental_targets(action)
         torque_integral,gripper_integral=self._advance_physics()
         self.steps+=1
-        info=self.info()
+        info=super().info()
         self.collision_total+=info['obstacle_contacts']+info['arm_contacts']
         self.grasp_seconds=np.where(info['grasped'],np.minimum(.1,self.grasp_seconds+self.dt),0.)
         self.used_arms|=self.grasp_seconds>=.1-1e-9
@@ -160,7 +190,8 @@ class StudyCurriculumEnv(PlacementCurriculumEnv):
         after=replace(after,lift_hold_seconds=self.lift_hold,carry_qualified=self.qualified)
         self.placement_hold=self.placement_hold+self.dt if placement_condition(after) else 0.
         after=replace(after,placement_hold_seconds=self.placement_hold)
-        result=compute_reward(before,after,stage=self.stage,gamma=self.reward_gamma,dt=self.dt,effort_scale=self.effort_scale)
+        result=compute_reward(before,after,stage=self.stage,gamma=self.reward_gamma,dt=self.dt,
+                              effort_scale=self.effort_scale,reward_scheme=self.reward_scheme)
         self.episode_return+=result.total
         self.episode_effort+=torque_integral+.25*gripper_integral
         # Compatibility fields for state snapshots and older viewers agree
@@ -176,13 +207,17 @@ class StudyCurriculumEnv(PlacementCurriculumEnv):
             self.episode_released_in_goal|=bool(self.qualified and after.inside_goal and after.table_support and after.robot_contacts==0 and not any(after.grasped))
             self.episode_placed|=bool(placement_condition(after))
             self.episode_premature_releases+=int(result.terms['premature_release']<0.)
-        info.update(self.info())
         info.update(is_success=result.success,fallen=after.fallen,episode_return=self.episode_return,reward_terms=result.terms,
                     reward_breakdown=result.breakdown,
                     episode_effort=self.episode_effort,episode_step=self.steps,used_arms=self.used_arms.copy(),
                     premature_release=result.terms['premature_release']<0.,
-                    carried=self.qualified,episode_lifted=self.ever_lifted,success_hold_seconds=self.lift_hold if self.stage==1 else self.placement_hold,
-                    approach_distance=float(min(after.hand_distances)),reward_scheme='reviewed',layout_mode='progressive')
+                    carried=self.qualified,episode_lifted=self.ever_lifted,success_hold_seconds=hold,
+                    collision_total=self.collision_total,placed=placement_condition(after),
+                    episode_goal_reached=self.episode_goal_reached,episode_released_in_goal=self.episode_released_in_goal,
+                    episode_placed=self.episode_placed,episode_premature_releases=self.episode_premature_releases,
+                    episode_goal_progress=self.episode_goal_progress,
+                    approach_distance=float(min(after.hand_distances)),reward_scheme=self.reward_scheme,
+                    reward_version=self.reward_version,lift_seconds=self.lift_hold,layout_mode='progressive')
         # Build observations AFTER updating clocks, including terminal states
         # that VecEnv uses to bootstrap time-limit truncations.
         return self._observation(),result.total,result.terminated,self.steps>=self.max_steps and not result.terminated,info
@@ -190,8 +225,8 @@ class StudyCurriculumEnv(PlacementCurriculumEnv):
     def info(self):
         info=super().info()
         if not self._study_initializing:
-            info.update(carried=self.qualified,episode_lifted=self.ever_lifted,layout_mode='progressive',reward_scheme='reviewed',
-                        reward_version=self.REWARD_VERSION,lift_seconds=self.lift_hold,
+            info.update(carried=self.qualified,episode_lifted=self.ever_lifted,layout_mode='progressive',reward_scheme=self.reward_scheme,
+                        reward_version=self.reward_version,lift_seconds=self.lift_hold,
                         success_hold_seconds=self.lift_hold if self.stage==1 else self.placement_hold,
                         placed=placement_condition(self.reward_state(info)))
         return info

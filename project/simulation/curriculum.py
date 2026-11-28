@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 import mujoco
 from simulation.dual_reacher import DualReacherEnv
+from simulation.reward_design import STUDY_REWARD_VERSIONS
 
 STAGE_NAMES = {1:'grasp_and_lift',2:'pick_and_place',3:'random_scenarios',4:'minimum_effort'}
 LEVELS = (0., .25, .5, .75, 1.)
@@ -196,7 +197,7 @@ def make_env(env_config=None, **kwargs):
     config=dict(env_config) if env_config is not None else None
     backend=config.pop('physics_backend','cpu') if config is not None else kwargs.pop('physics_backend','cpu')
     if backend not in ('cpu','warp'):raise ValueError('Unsupported physics backend')
-    if config is not None and config.get('reward_scheme')=='reviewed':
+    if config is not None and config.get('reward_scheme') in STUDY_REWARD_VERSIONS:
         from simulation.study_curriculum import StudyCurriculumEnv
         env=StudyCurriculumEnv(**config,**kwargs)
     elif config is not None and config.get('task_version',1)==2:

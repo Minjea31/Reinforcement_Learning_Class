@@ -40,10 +40,44 @@ class RewardDesignTests(unittest.TestCase):
         self.assertEqual(potential(a, 1), potential(b, 1))
         self.assertGreater(potential(a, 1), potential(replace(a, closing_alignments=(0., .2)), 1))
 
+    def test_pregrasp_progress_is_symmetric_bounded_to_one_arm_and_cannot_be_farmed(self):
+        a = RewardState((.05, .5), closing_alignments=(.8, .2))
+        b = replace(a, pregrasp_progress=(2., 3.))
+        swapped = replace(b, hand_distances=b.hand_distances[::-1],
+                          closing_alignments=b.closing_alignments[::-1],
+                          pregrasp_progress=b.pregrasp_progress[::-1])
+        self.assertEqual(potential(b, 1), potential(swapped, 1))
+        self.assertAlmostEqual(potential(b, 1)-potential(a, 1), 2.)
+        self.assertEqual(potential(b, 2), potential(a, 2))
+        forward = compute_reward(a, b, stage=1)
+        back = compute_reward(b, a, stage=1)
+        self.assertAlmostEqual(forward.breakdown['pregrasp'], 2.)
+        self.assertLess(forward.terms['shaping']+.999*back.terms['shaping'], 0.)
+
     def test_high_object_without_physical_grip_gets_no_lifting_credit(self):
         s = RewardState((.3, .5))
         self.assertEqual(potential(s, 1), potential(replace(s, clearance=.2), 1))
         self.assertFalse(lift_condition(replace(s, clearance=.2, table_support=False)))
+
+    def test_initial_lift_shaping_weights_low_clearance_and_keeps_success_rules(self):
+        grip = RewardState((.02, .5), grasped=(True, False), grasp_seconds=(.1, 0.))
+        for clearance, expected in ((.01, 5.), (.015, 7.5), (.03, 12.), (.06, 15.)):
+            with self.subTest(clearance=clearance):
+                lifted = replace(grip, clearance=clearance, table_support=False)
+                v5 = compute_reward(grip, lifted, stage=1, reward_scheme='grasp_progress')
+                v6 = compute_reward(grip, lifted, stage=1, reward_scheme='lift_progress')
+                self.assertAlmostEqual(v6.breakdown['lift'], expected)
+                self.assertAlmostEqual(v5.breakdown['lift'], 15.*clearance/.06)
+                self.assertFalse(v6.success)
+                self.assertEqual(potential(lifted, 2), potential(lifted, 2, reward_scheme='lift_progress'))
+        lifted = replace(grip, clearance=.06, table_support=False)
+        unheld = replace(lifted, grasped=(False, False), grasp_seconds=(0., 0.))
+        self.assertEqual(compute_reward(grip, unheld, stage=1, reward_scheme='lift_progress').breakdown['lift'], 0.)
+        success = replace(lifted, clearance=.03, lift_hold_seconds=.5)
+        self.assertTrue(compute_reward(lifted, success, stage=1, reward_scheme='lift_progress').success)
+        up = compute_reward(grip, lifted, stage=1, reward_scheme='lift_progress')
+        down = compute_reward(lifted, grip, stage=1, reward_scheme='lift_progress')
+        self.assertLess(up.terms['shaping']+.999*down.terms['shaping'], 0.)
 
     def test_success_requires_actual_stable_lift_and_terminal_potential_is_zero(self):
         s = RewardState((.005, .6), grasped=(True, False), grasp_seconds=(.1, 0.),

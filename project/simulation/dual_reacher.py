@@ -403,6 +403,7 @@ class DualReacherEnv(gym.Env):
         obstacle_contacts = 0
         finger_contacts = set()
         pad_contacts = {'left': set(), 'right': set()}
+        pad_normal_forces = {'left': {'a': 0., 'b': 0.}, 'right': {'a': 0., 'b': 0.}}
         arm_contacts = 0
         table_support = False
         for contact_index, contact in enumerate(self.data.contact[:self.data.ncon]):
@@ -417,9 +418,12 @@ class DualReacherEnv(gym.Env):
                 name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, other) or ''
                 contact_force = np.zeros(6)
                 mujoco.mj_contactForce(self.model, self.data, contact_index, contact_force)
-                if '_pad_' in name and contact_force[0] > .5:
-                    finger_contacts.add(name.split('_')[0])
-                    pad_contacts[name.split('_')[0]].add(name.rsplit('_',1)[-1])
+                if '_pad_' in name:
+                    arm, pad = name.split('_pad_')
+                    pad_normal_forces[arm][pad] = max(pad_normal_forces[arm][pad], float(contact_force[0]))
+                    if contact_force[0] > .5:
+                        finger_contacts.add(arm)
+                        pad_contacts[arm].add(pad)
                 table_support |= name == 'table' and contact_force[0] > .1
         distance = float(np.linalg.norm(position-self.goal))
         jid = self.id(mujoco.mjtObj.mjOBJ_JOINT, 'payload_free')
@@ -441,6 +445,8 @@ class DualReacherEnv(gym.Env):
                 'obstacle_size':self.model.geom_size[self.obstacle_geom].copy(),
                 'inside_goal': inside_goal,
                 'grasped': grasped, 'arm_contacts': arm_contacts, 'tilt_degrees': tilt,
+                'pad_normal_forces': tuple(tuple(pad_normal_forces[arm][pad] for pad in ('a', 'b'))
+                                           for arm in ('left', 'right')),
                 'success_hold_seconds': getattr(self,'success_steps',0)*self.dt,
                 'collision_total': getattr(self,'collision_total',0),
                 'payload_mass': self.mass, 'weight_newtons': self.mass*abs(self.model.opt.gravity[2]),
